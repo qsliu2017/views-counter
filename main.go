@@ -33,7 +33,7 @@ func main() {
 	pg = conn
 	defer conn.Close(context.TODO())
 
-	if _, err := pg.Query(context.TODO(), "SELECT 1 FROM TABLE count"); err != nil {
+	if err := pg.QueryRow(context.TODO(), "SELECT 1 FROM count").Scan(nil); err != nil {
 		_, err := pg.Exec(context.TODO(), sql)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Unable to create table count: %v\n", err)
@@ -55,29 +55,34 @@ func getBadge(c echo.Context) error {
 
 	tx, err := pg.Begin(ctx)
 	if err != nil {
+		c.Logger().Error(err)
 		return err
 	}
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO count (payload) VALUES ('%+v')", c.Request())); err != nil {
+		c.Logger().Error(err)
 		return err
 	}
 
 	row := tx.QueryRow(ctx, "SELECT COUNT(*) FROM count")
 	var count int
 	if err := row.Scan(&count); err != nil {
-		return nil
+		c.Logger().Error(err)
+		return err
 	}
 
 	tx.Commit(ctx)
 
 	r, err := http.Get(fmt.Sprintf("https://badgen.net/badge/views-counter/%d/green?icon=github", count))
 	if err != nil {
+		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	c.Response().Header().Set("content-type", r.Header.Get("content-type"))
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
+		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	return c.String(http.StatusOK, string(b))
