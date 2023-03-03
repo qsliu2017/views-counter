@@ -1,15 +1,46 @@
 package main
 
 import (
+	"context"
+	_ "embed"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
+var (
+	//go:embed store.sql
+	sql string
+	pg  *pgx.Conn
+)
+
 func main() {
+	dburl := os.Getenv("DATABASE_URL")
+	if dburl == "" {
+		dburl = "postgres://username:password@localhost:5432/views_count"
+	}
+
+	conn, err := pgx.Connect(context.TODO(), dburl)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	pg = conn
+	defer conn.Close(context.TODO())
+
+	if _, err := pg.Query(context.TODO(), "SELECT 1 FROM TABLE count"); err != nil {
+		_, err := pg.Exec(context.TODO(), sql)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to create table count: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	e := echo.New()
 
 	e.Use(middleware.Logger())
@@ -20,7 +51,27 @@ func main() {
 }
 
 func getBadge(c echo.Context) error {
-	r, err := http.Get(fmt.Sprintf("https://badgen.net/badge/views-counter/%d/green?icon=github", count(c.QueryParam("username"))))
+	ctx := c.Request().Context()
+
+	tx, err := pg.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO count (payload) VALUES ('%+v')", c.Request())); err != nil {
+		return err
+	}
+
+	row := tx.QueryRow(ctx, "SELECT COUNT(*) FROM count")
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return nil
+	}
+
+	tx.Commit(ctx)
+
+	r, err := http.Get(fmt.Sprintf("https://badgen.net/badge/views-counter/%d/green?icon=github", count))
 	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -30,8 +81,4 @@ func getBadge(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	return c.String(http.StatusOK, string(b))
-}
-
-func count(username string) int {
-	return 234
 }
