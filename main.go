@@ -19,12 +19,24 @@ var (
 	//go:embed badge.svg
 	badge string
 
-	pg      *pgx.Conn
-	count   uint64
-	reqChan chan *http.Request
+	databaseUrl string
+	address     string
+	pg          *pgx.Conn
+	count       uint64
+	reqChan     chan *http.Request
 )
 
 func init() {
+	databaseUrl = os.Getenv("DATABASE_URL")
+	if databaseUrl == "" {
+		databaseUrl = "postgres://username:password@localhost:5432/views_count"
+	}
+
+	address = os.Getenv("ADDRESS")
+	if address == "" {
+		address = ":80"
+	}
+
 	reqChan = make(chan *http.Request, 10)
 }
 
@@ -32,12 +44,7 @@ func main() {
 	ctx, cancle := context.WithCancel(context.Background())
 	defer cancle()
 
-	dburl := os.Getenv("DATABASE_URL")
-	if dburl == "" {
-		dburl = "postgres://username:password@localhost:5432/views_count"
-	}
-
-	conn, err := pgx.Connect(ctx, dburl)
+	conn, err := pgx.Connect(ctx, databaseUrl)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
 		os.Exit(1)
@@ -61,7 +68,7 @@ func main() {
 
 	e.GET("/", getBadge)
 
-	e.Start(":8081")
+	e.Start(address)
 }
 
 func getBadge(c echo.Context) error {
