@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"sync/atomic"
@@ -16,7 +15,10 @@ import (
 
 var (
 	//go:embed store.sql
-	sql     string
+	sql string
+	//go:embed badge.svg
+	badge string
+
 	pg      *pgx.Conn
 	count   uint64
 	reqChan chan *http.Request
@@ -65,18 +67,9 @@ func main() {
 func getBadge(c echo.Context) error {
 	reqChan <- c.Request()
 
-	r, err := http.Get(fmt.Sprintf("https://badgen.net/badge/views-counter/%d/green?icon=github", atomic.AddUint64(&count, 1)))
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	c.Response().Header().Set("content-type", r.Header.Get("content-type"))
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	return c.String(http.StatusOK, string(b))
+	c.Response().Header().Set("content-type", "image/svg+xml;charset=utf-8")
+	c.Response().Header().Set("cache-control", "public, max-age=120")
+	return c.String(http.StatusOK, badgen(atomic.AddUint64(&count, 1)))
 }
 
 func requestRecorder(ctx context.Context, logger echo.Logger, reqChan <-chan *http.Request) {
@@ -91,4 +84,8 @@ func requestRecorder(ctx context.Context, logger echo.Logger, reqChan <-chan *ht
 			}
 		}
 	}
+}
+
+func badgen(count uint64) string {
+	return fmt.Sprintf(badge, count, count, count, count)
 }
